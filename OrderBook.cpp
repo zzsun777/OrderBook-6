@@ -9,17 +9,17 @@ bool OrderBook::enterOrder(int id, char side, double price, int quantity)
       return false;
     }
 
-  // else add the order to the hash map and also add and update the heap based on the side (if valid side)
+  // else add the order to the hash map and also add and update the set based on the side (if valid side)
   bool status = true;
   switch(side)
     {
     case SIDE::BID:
       orderIdHashMap_[id] = OrderPtr(new Order(id, side, price, quantity));
-      addOrUpdateHeap(bidHeap_, orderIdHashMap_[id], SIDE::BID);
+      addOrUpdateSet(orderIdHashMap_[id], SIDE::BID);
       break;
     case SIDE::OFFER:
       orderIdHashMap_[id] = OrderPtr(new Order(id, side, price, quantity));
-      addOrUpdateHeap(offerHeap_, orderIdHashMap_[id], SIDE::OFFER);
+      addOrUpdateSet(orderIdHashMap_[id], SIDE::OFFER);
       break;
     default:
       cerr << "Invalid SIDE received. Order Creation failed!!!" << endl;
@@ -72,13 +72,13 @@ bool OrderBook::modifyOrder(int id, int quantity)
 void OrderBook::printOrderBook()
 {
   cout << "Printing Bid OrderBook" << endl;
-  for (OrderHeap::iterator iter = bidHeap_.begin(); iter != bidHeap_.end(); ++iter)
+  for (AscendOrderSet::iterator iter = bidSet_.begin(); iter != bidSet_.end(); ++iter)
     {
       cout << (*iter)->price_ << " : " << (*iter)->totalQty_ << endl;
     }
 
   cout << "Printing Offer OrderBook" << endl;
-  for (OrderHeap::iterator iter = offerHeap_.begin(); iter != offerHeap_.end(); ++iter)
+  for (DescendOrderSet::iterator iter = offerSet_.begin(); iter != offerSet_.end(); ++iter)
     {
       cout << (*iter)->price_ << " : " << (*iter)->totalQty_ << endl;
     }
@@ -88,15 +88,28 @@ double OrderBook::getPriceForSideAndLevel(char side, int level /*= 0*/)
 {
   double price = 0.0;
 
+  if (level < 0)
+    return price;
+  
   switch(side)
     {
     case SIDE::BID:
-      if (level < bidHeap_.size())
-	price = bidHeap_[level]->price_;
+      if (level < bidSet_.size())
+	{
+	  AscendOrderSet::iterator iter;
+	  iter = bidSet_.begin();
+	  advance(iter, level);
+	  price = (*iter)->price_;
+	}
       break;
     case SIDE::OFFER:
-      if (level < offerHeap_.size())
-	price = offerHeap_[level]->price_;
+      if (level < offerSet_.size())
+	{
+	  DescendOrderSet::iterator iter;
+	  iter = offerSet_.begin();
+	  advance(iter, level);
+	  price = (*iter)->price_;
+	}
       break;
     default:
       cerr << "Invalid side given!!" << endl;
@@ -110,15 +123,28 @@ double OrderBook::getQuantityForSideAndLevel(char side, int level /*= 0*/)
 {
   int totalQty = 0;
 
+  if (level < 0)
+    return totalQty;
+  
   switch(side)
     {
     case SIDE::BID:
-      if (level < bidHeap_.size())
-	totalQty = bidHeap_[level]->totalQty_;
+      if (level < bidSet_.size())
+	{
+	  AscendOrderSet::iterator iter;
+	  iter = bidSet_.begin();
+	  advance(iter, level);
+	  totalQty = (*iter)->totalQty_;
+	}
       break;
     case SIDE::OFFER:
-      if (level < offerHeap_.size())
-	totalQty = offerHeap_[level]->totalQty_;
+      if (level < offerSet_.size())
+	{
+	  DescendOrderSet::iterator iter;
+	  iter = offerSet_.begin();
+	  advance(iter, level);
+	  totalQty = (*iter)->totalQty_;
+	}
       break;
     default:
       cerr << "Invalid side given!!" << endl;
@@ -134,14 +160,14 @@ bool OrderBook::deleteOrder(int id)
   if (iter != orderIdHashMap_.end())
     {
       orderIdHashMap_.erase(iter);
-      // found the element. now delete from the heap and then delete from this hash map
-      return deleteFromHeap((iter->second->side_ == SIDE::BID) ? bidHeap_ : offerHeap_, iter->second, iter->second->side_);
+      // found the element. now delete from the set and then delete from this hash map
+      return deleteFromSet(iter->second, iter->second->side_);
     }
 
   return false;
 }
 
-void OrderBook::addOrUpdateHeap(OrderHeap& heap, OrderPtr& orderPtr, char side)
+void OrderBook::addOrUpdateSet(OrderPtr& orderPtr, char side)
 {
   OrderListHashMap& orderListHashMap = (side == SIDE::BID)? bidOrderHashMap_ : offerOrderHashMap_;  
   OrderListHashMap::iterator iter = orderListHashMap.find(orderPtr->price_);
@@ -153,14 +179,16 @@ void OrderBook::addOrUpdateHeap(OrderHeap& heap, OrderPtr& orderPtr, char side)
     }
   else
     {
-      // new price .. need to heapify
+      // new price .. need to bst insert into set (logn)
       orderListHashMap[orderPtr->price_] = OrderListPtr(new OrderList(orderPtr));
-      heap.push_back(orderListHashMap[orderPtr->price_]);
-      push_heap(heap.begin(), heap.end(), (side == SIDE::BID) ? (OrderList::lessThan) : (OrderList::greaterThan));
+      if (side == SIDE::BID)
+	bidSet_.insert(orderListHashMap[orderPtr->price_]); // logn insert cost since bst
+      else
+	offerSet_.insert(orderListHashMap[orderPtr->price_]); // logn insert cost since bst
     }
 }
 
-bool OrderBook::deleteFromHeap(OrderHeap& heap, OrderPtr& orderPtr, char side)
+bool OrderBook::deleteFromSet(OrderPtr& orderPtr, char side)
 {
   OrderListHashMap& orderListHashMap = (side == SIDE::BID)? bidOrderHashMap_ : offerOrderHashMap_;  
   OrderListHashMap::iterator iter = orderListHashMap.find(orderPtr->price_);
@@ -170,13 +198,13 @@ bool OrderBook::deleteFromHeap(OrderHeap& heap, OrderPtr& orderPtr, char side)
       iter->second->totalQty_ = iter->second->totalQty_ - orderPtr->quantity_; // reduce the quantity of the order from totalQty
       iter->second->orderList_.remove(orderPtr);
 
-      if (iter->second->totalQty_ == 0) // remove the empty orderListPtr from the heap and heapify again
+      if (iter->second->totalQty_ == 0) // remove the empty orderListPtr from the set (logn) since bst
 	{
-	  OrderHeap::iterator ptr = find(heap.begin(), heap.end(), iter->second);
-	  heap.erase(ptr);
+	  if (side == SIDE::BID)
+	    bidSet_.erase(iter->second);
+	  else
+	    offerSet_.erase(iter->second);
 
-	  // improve here by only heapifying the sub trees	  
-	  make_heap(heap.begin(), heap.end(), (side == SIDE::BID) ? (OrderList::lessThan) : (OrderList::greaterThan));
 	  orderListHashMap.erase(iter); // remove the element off the hashmap too since no quantity .. could keep it if chances of the same price are more (save the creation and erase times... for now deleting it
 	}
 

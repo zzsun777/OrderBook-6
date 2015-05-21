@@ -7,6 +7,7 @@
 #include <vector>
 #include <list>
 #include <map>
+#include <set>
 
 using namespace std;
 
@@ -54,32 +55,40 @@ private:
     {
       orderList_.push_back(orderPtr);
     }
-
-    // implement compare operators for heap based on price
-    static bool lessThan(const OrderListPtr& L1, const OrderListPtr& L2)
-    {
-      return ((L1->price_ - L2->price_) < (1E-6)); // floating point comparision .. compare to epsilon...
-    }
-
-    // implement compare operators for heap based on price
-    static bool greaterThan(const OrderListPtr& L1, const OrderListPtr& L2)
-    {
-      return ((L1->price_ - L2->price_) > (1E-6)); // floating point comparision .. compare to epsilon...
-    }
   };
 
-  
+  struct AscendCompare
+  {
+    bool operator() (const OrderListPtr& OLP1, const OrderListPtr& OLP2)
+    {
+      return comparator(OLP1->price_, OLP2->price_);
+    }
+
+    greater<double> comparator;    
+  };
+
+  struct DescendCompare
+  {
+    bool operator() (const OrderListPtr& OLP1, const OrderListPtr& OLP2)
+    {
+      return !comparator(OLP1->price_, OLP2->price_);
+    }
+    
+    greater<double> comparator;
+  };
+
   // store id to orderPtr hash map for constant time lookup of order based on id's
   typedef boost::unordered_map<int, OrderPtr> OrderIdHashMap;
 
-  // have a heap(vector) based on the distinct price we have at hand
-  typedef vector<OrderListPtr> OrderHeap;
+  // have a set to maintain distinct sorted price
+  typedef set<OrderListPtr, AscendCompare> AscendOrderSet;
+  typedef set<OrderListPtr, DescendCompare> DescendOrderSet;  
 
   // store price to orderlist hash map for constant time lookup for existing price
   typedef boost::unordered_map<double, OrderListPtr> OrderListHashMap; 
 
-  OrderHeap bidHeap_; // will be a max heap to keep the best price on top
-  OrderHeap offerHeap_; // will be a min heap to keep the best ask price on top
+  AscendOrderSet bidSet_; // will be a max set to keep the best price on top
+  DescendOrderSet offerSet_; // will be a min set to keep the best ask price on top
   OrderListHashMap bidOrderHashMap_;
   OrderListHashMap offerOrderHashMap_;  
   OrderIdHashMap orderIdHashMap_;
@@ -88,8 +97,8 @@ private:
   OrderBook(const OrderBook& );
   OrderBook& operator=(const OrderBook&);
 
-  void addOrUpdateHeap(OrderHeap& heap, OrderPtr& orderPtr, char side);
-  bool deleteFromHeap(OrderHeap& heap, OrderPtr& orderPtr, char side);
+  void addOrUpdateSet(OrderPtr& orderPtr, char side);
+  bool deleteFromSet(OrderPtr& orderPtr, char side);
 
 public:
   OrderBook() {}
